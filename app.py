@@ -2,7 +2,8 @@ import streamlit as st
 import logging
 from src.data.extractor import BinanceExtractor
 from src.engine.analytics import FinanceEngine
-from src.ui.components import apply_custom_css, render_metrics_cards, render_candlestick_chart
+from src.engine.forecasting import ForecastEngine
+from src.ui.components import apply_custom_css, render_metrics_cards, render_candlestick_chart, render_forecast_tab
 
 # Configuração de Logs
 logging.basicConfig(level=logging.INFO)
@@ -165,14 +166,41 @@ def main() -> None:
     if st.session_state["processed_data"] is not None:
         processed_df = st.session_state["processed_data"]
         
-        # Renderiza a linha superior com os cards de KPI customizados
-        render_metrics_cards(processed_df)
+        # Criação das Abas na parte superior do Dashboard
+        tab1, tab2 = st.tabs(["📊 Monitoramento de Volatilidade", "🔮 Previsão Probabilística"])
         
-        st.write("")
-        
-        # Título do Gráfico e visualização do Plotly integrado
-        st.markdown(f"### Monitoramento e Gráfico Analítico de {symbol} ({interval})")
-        render_candlestick_chart(processed_df, z_threshold=z_threshold)
+        with tab1:
+            # Renderiza a linha superior com os cards de KPI customizados
+            render_metrics_cards(processed_df)
+            
+            st.write("")
+            
+            # Título do Gráfico e visualização do Plotly integrado
+            st.markdown(f"### Monitoramento e Gráfico Analítico de {symbol} ({interval})")
+            render_candlestick_chart(processed_df, z_threshold=z_threshold)
+            
+        with tab2:
+            st.markdown("### 🔮 Projeção Estatística de Curto Prazo")
+            st.markdown("Previsões baseadas no consenso de modelos ARIMA, Holt (Suavização Exponencial) e Regressão Linear.")
+            
+            # Slider de passos futuros dentro da aba
+            steps = st.slider(
+                "Períodos de Previsão (Candles à frente):",
+                min_value=3,
+                max_value=15,
+                value=7,
+                step=1,
+                help="Quantidade de períodos futuros para projetar os preços."
+            )
+            
+            # Execução do motor de previsão
+            forecaster = ForecastEngine(steps=steps)
+            with st.spinner("Computando modelos preditivos..."):
+                try:
+                    forecast_df = forecaster.run_forecast(processed_df)
+                    render_forecast_tab(processed_df, forecast_df, steps=steps)
+                except Exception as err:
+                    st.error(f"⚠️ Erro ao calcular as previsões: {err}")
         
         # Rodapé com o carimbo de data/hora
         last_update_utc = processed_df["timestamp"].iloc[-1].strftime("%Y-%m-%d %H:%M:%S")

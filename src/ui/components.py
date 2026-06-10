@@ -435,3 +435,202 @@ def render_candlestick_chart(df: pd.DataFrame, z_threshold: float = 2.0) -> None
     )
     
     st.plotly_chart(fig, use_container_width=True)
+
+
+def render_forecast_tab(df: pd.DataFrame, forecast_df: pd.DataFrame, steps: int) -> None:
+    """
+    Renderiza a aba de Previsão Probabilística contendo cards de tendência,
+    dados projetados e o gráfico Plotly estendido com intervalos de confiança.
+    """
+    if df is None or df.empty or forecast_df is None or forecast_df.empty:
+        st.warning("Dados insuficientes para renderizar a previsão.")
+        return
+
+    # 1. Recuperar preços finais e variação estimada
+    last_price = float(df["close"].iloc[-1])
+    target_price = float(forecast_df["consensus"].iloc[-1])
+    pct_change = ((target_price - last_price) / last_price) * 100
+    
+    # Detalhes do intervalo de confiança final
+    lower_price = float(forecast_df["lower_bound"].iloc[-1])
+    upper_price = float(forecast_df["upper_bound"].iloc[-1])
+    
+    # 2. Configurar estados e cores de tendência
+    if pct_change > 1.5:
+        trend_status = "ALTA"
+        trend_color = "#00ffcc" # var(--neon-cyan)
+        trend_shadow = "0 0 10px #00ffcc"
+    elif pct_change < -1.5:
+        trend_status = "BAIXA"
+        trend_color = "#ff0055" # var(--neon-pink)
+        trend_shadow = "0 0 10px #ff0055"
+    else:
+        trend_status = "NEUTRA"
+        trend_color = "#ffff00" # yellow
+        trend_shadow = "0 0 10px #ffff00"
+        
+    change_sign = "+" if pct_change >= 0 else ""
+    change_str = f"{change_sign}{pct_change:.2f}%"
+    
+    # Formatação de preços
+    fmt_price = lambda x: f"${x:,.2f}" if x >= 1.0 else f"${x:.6f}"
+    
+    # 3. Exibir KPIs de Previsão
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-top: 3px solid #ffff00;">
+            <div class="kpi-title">Projeção Consenso</div>
+            <div class="kpi-value" style="color: #ffffff;">{fmt_price(target_price)}</div>
+            <div class="kpi-subtitle" style="color: #8a8d9a;">Em {steps} períodos</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with col2:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-top: 3px solid {trend_color}; box-shadow: inset 0 0 10px {trend_color}10;">
+            <div class="kpi-title">Tendência Esperada</div>
+            <div class="kpi-value" style="color: {trend_color}; text-shadow: {trend_shadow}; font-weight: 700;">{trend_status}</div>
+            <div class="kpi-subtitle" style="color: {trend_color};">{change_str} esperados</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with col3:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-top: 3px solid #00ffcc;">
+            <div class="kpi-title">Limite Superior (95%)</div>
+            <div class="kpi-value" style="color: #ffffff;">{fmt_price(upper_price)}</div>
+            <div class="kpi-subtitle" style="color: #8a8d9a;">Cenário Mais Otimista</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with col4:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-top: 3px solid #ff0055;">
+            <div class="kpi-title">Limite Inferior (95%)</div>
+            <div class="kpi-value" style="color: #ffffff;">{fmt_price(lower_price)}</div>
+            <div class="kpi-subtitle" style="color: #8a8d9a;">Cenário Mais Crítico</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    st.write("")
+    
+    # 4. Criar o gráfico de previsão interativo no Plotly
+    # Mostra apenas os últimos 60 candles para não poluir o gráfico
+    recent_history_len = min(60, len(df))
+    hist_subset = df.iloc[-recent_history_len:]
+    
+    fig = go.Figure()
+    
+    # Linha do preço histórico real
+    fig.add_trace(go.Scatter(
+        x=hist_subset["timestamp"],
+        y=hist_subset["close"],
+        name="Preço Histórico",
+        line=dict(color="#ffffff", width=2)
+    ))
+    
+    # Para ligar visualmente o histórico ao futuro, adicionamos o último ponto histórico ao início das projeções
+    last_hist_row = hist_subset.iloc[-1]
+    
+    # Criamos séries conectadas
+    future_x = pd.concat([pd.Series([last_hist_row["timestamp"]]), forecast_df["timestamp"]])
+    
+    # Função auxiliar para conectar projeção
+    def get_connected_series(forecast_col):
+        return pd.concat([pd.Series([last_hist_row["close"]]), forecast_df[forecast_col]])
+        
+    # Área sombreada do intervalo de confiança
+    lower_bound_conn = get_connected_series("lower_bound")
+    upper_bound_conn = get_connected_series("upper_bound")
+    
+    fig.add_trace(go.Scatter(
+        x=future_x,
+        y=upper_bound_conn,
+        mode="lines",
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo="skip"
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=future_x,
+        y=lower_bound_conn,
+        mode="lines",
+        fill="tonexty",
+        fillcolor="rgba(255, 255, 0, 0.08)", # Sombreado amarelo discreto
+        name="Intervalo de Confiança (95%)",
+        hoverinfo="skip"
+    ))
+    
+    # Projeção ARIMA
+    fig.add_trace(go.Scatter(
+        x=future_x,
+        y=get_connected_series("arima"),
+        name="ARIMA",
+        line=dict(color="#ff0055", width=1.5, dash="dot")
+    ))
+    
+    # Projeção Holt
+    fig.add_trace(go.Scatter(
+        x=future_x,
+        y=get_connected_series("holt_winters"),
+        name="Holt-Winters",
+        line=dict(color="#00ffcc", width=1.5, dash="dot")
+    ))
+    
+    # Projeção Regressão Linear
+    fig.add_trace(go.Scatter(
+        x=future_x,
+        y=get_connected_series("linear_regression"),
+        name="Regressão Linear",
+        line=dict(color="#8a8d9a", width=1.5, dash="dot")
+    ))
+    
+    # Projeção Consenso
+    fig.add_trace(go.Scatter(
+        x=future_x,
+        y=get_connected_series("consensus"),
+        name="Consenso (Média)",
+        line=dict(color="#ffff00", width=2.5) # Linha amarela de destaque
+    ))
+    
+    # Customização visual do Plotly (Tema Futurista / Cyberpunk)
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(12, 13, 20, 0.0)",
+        plot_bgcolor="rgba(12, 13, 20, 0.3)",
+        font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+        hovermode="x unified",
+        margin=dict(t=30, b=10, l=10, r=10),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(size=11)
+        ),
+        height=550
+    )
+    
+    fig.update_xaxes(
+        showgrid=True,
+        gridcolor="rgba(31, 34, 53, 0.4)",
+        linecolor="rgba(0, 255, 204, 0.2)",
+        zeroline=False
+    )
+    
+    fig.update_yaxes(
+        showgrid=True,
+        gridcolor="rgba(31, 34, 53, 0.4)",
+        linecolor="rgba(0, 255, 204, 0.2)",
+        zeroline=False,
+        title_text="Preço",
+        title_font=dict(size=12, color="#00ffcc")
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
