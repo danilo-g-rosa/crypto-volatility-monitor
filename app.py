@@ -3,7 +3,8 @@ import logging
 from src.data.extractor import BinanceExtractor
 from src.engine.analytics import FinanceEngine
 from src.engine.forecasting import ForecastEngine
-from src.ui.components import apply_custom_css, render_metrics_cards, render_candlestick_chart, render_forecast_tab
+from src.engine.anomaly_prob import AnomalyProbabilityEngine
+from src.ui.components import apply_custom_css, render_metrics_cards, render_candlestick_chart, render_forecast_tab, render_anomaly_probability_tab
 
 # Configuração de Logs
 logging.basicConfig(level=logging.INFO)
@@ -167,7 +168,11 @@ def main() -> None:
         processed_df = st.session_state["processed_data"]
         
         # Criação das Abas na parte superior do Dashboard
-        tab1, tab2 = st.tabs(["📊 Monitoramento de Volatilidade", "🔮 Previsão Probabilística"])
+        tab1, tab2, tab3 = st.tabs([
+            "📊 Monitoramento de Volatilidade", 
+            "🔮 Previsão Probabilística", 
+            "⚡ Probabilidade de Anomalias"
+        ])
         
         with tab1:
             # Renderiza a linha superior com os cards de KPI customizados
@@ -201,6 +206,19 @@ def main() -> None:
                     render_forecast_tab(processed_df, forecast_df, steps=steps)
                 except Exception as err:
                     st.error(f"⚠️ Erro ao calcular as previsões: {err}")
+                    
+        with tab3:
+            st.markdown("### ⚡ Análise de Risco e Probabilidade de Anomalias")
+            st.markdown("Estatísticas baseadas na distribuição e transição de anomalias computadas em tempo real.")
+            
+            # Execução do motor probabilístico de anomalias
+            anomaly_engine = AnomalyProbabilityEngine()
+            with st.spinner("Computando modelos probabilísticos de risco..."):
+                try:
+                    anomaly_metrics = anomaly_engine.calculate_metrics(processed_df)
+                    render_anomaly_probability_tab(processed_df, anomaly_metrics, z_threshold=z_threshold)
+                except Exception as err:
+                    st.error(f"⚠️ Erro ao calcular as probabilidades de anomalia: {err}")
         
         # Rodapé com o carimbo de data/hora
         last_update_utc = processed_df["timestamp"].iloc[-1].strftime("%Y-%m-%d %H:%M:%S")

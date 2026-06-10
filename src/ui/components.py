@@ -634,3 +634,196 @@ def render_forecast_tab(df: pd.DataFrame, forecast_df: pd.DataFrame, steps: int)
     
     st.plotly_chart(fig, use_container_width=True)
 
+
+def render_anomaly_probability_tab(df: pd.DataFrame, metrics: dict, z_threshold: float) -> None:
+    """
+    Renderiza a aba de Análise de Risco e Probabilidade de Anomalias.
+    Exibe indicadores de risco imediato, matriz de transição de Markov e curva de Poisson.
+    """
+    if df is None or df.empty or metrics is None:
+        st.warning("Dados insuficientes para renderizar a análise probabilística de anomalias.")
+        return
+
+    # 1. KPIs de Probabilidade
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-top: 3px solid var(--neon-cyan);">
+            <div class="kpi-title">Limiar Z-Score Atual</div>
+            <div class="kpi-value" style="color: var(--neon-cyan); text-shadow: 0 0 5px rgba(0,255,204,0.4);">{z_threshold:,.1f}</div>
+            <div class="kpi-subtitle" style="color: #8a8d9a;">Sensibilidade de Filtro</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with col2:
+        risk_color = "var(--neon-pink)" if metrics["immediate_risk"] > 10 else "var(--neon-cyan)"
+        risk_shadow = "0 0 10px #ff0055" if metrics["immediate_risk"] > 10 else "0 0 10px #00ffcc"
+        st.markdown(f"""
+        <div class="kpi-card" style="border-top: 3px solid {risk_color}; box-shadow: inset 0 0 10px {risk_color}10;">
+            <div class="kpi-title">Risco Próximo Período</div>
+            <div class="kpi-value" style="color: {risk_color}; text-shadow: {risk_shadow}; font-weight: 700;">{metrics["immediate_risk"]:.1f}%</div>
+            <div class="kpi-subtitle" style="color: #8a8d9a;">Condicionado ao Estado Atual</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with col3:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-top: 3px solid #ffff00;">
+            <div class="kpi-title">Frequência de Anomalia</div>
+            <div class="kpi-value" style="color: #ffffff;">{metrics["overall_probability"]:.1f}%</div>
+            <div class="kpi-subtitle" style="color: #8a8d9a;">{metrics["num_anomalies"]} de {metrics["total_points"]} candles</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with col4:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-top: 3px solid #e2e8f0;">
+            <div class="kpi-title">Distância Média</div>
+            <div class="kpi-value" style="color: #ffffff;">{metrics["mean_distance"]:.1f}</div>
+            <div class="kpi-subtitle" style="color: #8a8d9a;">Candles entre ocorrências</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.write("")
+
+    # 2. Layout do Corpo Principal: Gráficos de Markov e Poisson
+    chart_col1, chart_col2 = st.columns(2)
+
+    with chart_col1:
+        st.markdown("#### 🔄 Matriz de Transição de Markov (Probabilidade de Mudança)")
+        st.write("Exibe a probabilidade de transição entre estados de mercado de um período para o outro.")
+        
+        # Matriz de Transição
+        matrix = metrics["markov_matrix"]
+        z_matrix = [
+            [matrix.get("S_to_S", 0.0), matrix.get("S_to_A", 0.0)],
+            [matrix.get("A_to_S", 0.0), matrix.get("A_to_A", 0.0)]
+        ]
+        
+        fig_markov = go.Figure(data=go.Heatmap(
+            z=z_matrix,
+            x=["Ir para: Estável", "Ir para: Anomalia"],
+            y=["De: Estável", "De: Anomalia"],
+            colorscale=[[0, "rgba(12, 13, 20, 0.95)"], [0.5, "rgba(0, 255, 204, 0.4)"], [1, "rgba(255, 0, 85, 0.75)"]],
+            text=[[f"{z_matrix[0][0]:.1f}%", f"{z_matrix[0][1]:.1f}%"],
+                  [f"{z_matrix[1][0]:.1f}%", f"{z_matrix[1][1]:.1f}%"]],
+            texttemplate="%{text}",
+            textfont=dict(family="Rajdhani, sans-serif", size=16, color="#ffffff"),
+            showscale=False
+        ))
+        
+        fig_markov.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(12, 13, 20, 0.0)",
+            plot_bgcolor="rgba(12, 13, 20, 0.3)",
+            font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+            height=300,
+            margin=dict(t=10, b=10, l=10, r=10)
+        )
+        st.plotly_chart(fig_markov, use_container_width=True)
+
+    with chart_col2:
+        st.markdown("#### ⏳ Risco Acumulado nos Próximos Períodos (Processo de Poisson)")
+        st.write("A probabilidade de enfrentar ao menos uma nova anomalia nas próximas velas à frente.")
+        
+        fig_poisson = go.Figure()
+        fig_poisson.add_trace(go.Scatter(
+            x=metrics["poisson_curve"]["steps"],
+            y=metrics["poisson_curve"]["probabilities"],
+            mode="lines+markers",
+            name="Risco Acumulado",
+            line=dict(color="#ffff00", width=2),
+            marker=dict(color="#ffff00", size=6),
+            hovertemplate="<b>Períodos à frente:</b> %{x}<br><b>Probabilidade:</b> %{y:.1f}%<extra></extra>"
+        ))
+        
+        fig_poisson.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(12, 13, 20, 0.0)",
+            plot_bgcolor="rgba(12, 13, 20, 0.3)",
+            font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+            height=300,
+            margin=dict(t=10, b=10, l=10, r=10),
+            xaxis=dict(title="Número de Períodos Futuros (Candles)"),
+            yaxis=dict(title="Probabilidade (%)", range=[0, 100])
+        )
+        
+        fig_poisson.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+        fig_poisson.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+        st.plotly_chart(fig_poisson, use_container_width=True)
+
+    # 3. Análise de Fatores Temporais (Janelas de Volatilidade)
+    if metrics["hourly_distribution"] or metrics["weekday_distribution"]:
+        st.write("")
+        st.markdown("#### ⏰ Perfil Temporal de Risco e Volatilidade")
+        st.write("Identificação das janelas de tempo com maior propensão histórica à ocorrência de anomalias.")
+
+        temp_col1, temp_col2 = st.columns(2)
+
+        with temp_col1:
+            if metrics["hourly_distribution"]:
+                hours = [item["hour"] for item in metrics["hourly_distribution"]]
+                rates = [item["rate"] for item in metrics["hourly_distribution"]]
+                
+                fig_hour = go.Figure(data=go.Bar(
+                    x=hours,
+                    y=rates,
+                    marker_color="rgba(0, 255, 204, 0.65)",
+                    marker_line=dict(color="var(--neon-cyan)", width=1),
+                    hovertemplate="<b>Hora UTC:</b> %{x}h<br><b>Taxa de Anomalia:</b> %{y:.1f}%<extra></extra>"
+                ))
+                
+                fig_hour.update_layout(
+                    template="plotly_dark",
+                    paper_bgcolor="rgba(12, 13, 20, 0.0)",
+                    plot_bgcolor="rgba(12, 13, 20, 0.3)",
+                    font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+                    height=280,
+                    margin=dict(t=10, b=10, l=10, r=10),
+                    xaxis=dict(title="Hora do Dia (UTC)", tickmode="linear", tick0=0, dtick=2),
+                    yaxis=dict(title="Taxa de Anomalia (%)")
+                )
+                fig_hour.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)")
+                fig_hour.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)")
+                st.plotly_chart(fig_hour, use_container_width=True)
+            else:
+                st.info("Distribuição horária indisponível.")
+
+        with temp_col2:
+            if metrics["weekday_distribution"]:
+                days = [item["day"] for item in metrics["weekday_distribution"]]
+                rates = [item["rate"] for item in metrics["weekday_distribution"]]
+                
+                # Tradução amigável dos dias da semana
+                day_translations = {
+                    "Monday": "Seg", "Tuesday": "Ter", "Wednesday": "Qua",
+                    "Thursday": "Qui", "Friday": "Sex", "Saturday": "Sáb", "Sunday": "Dom"
+                }
+                translated_days = [day_translations.get(day, day[:3]) for day in days]
+                
+                fig_day = go.Figure(data=go.Bar(
+                    x=translated_days,
+                    y=rates,
+                    marker_color="rgba(255, 0, 85, 0.65)",
+                    marker_line=dict(color="var(--neon-pink)", width=1),
+                    hovertemplate="<b>Dia:</b> %{x}<br><b>Taxa de Anomalia:</b> %{y:.1f}%<extra></extra>"
+                ))
+                
+                fig_day.update_layout(
+                    template="plotly_dark",
+                    paper_bgcolor="rgba(12, 13, 20, 0.0)",
+                    plot_bgcolor="rgba(12, 13, 20, 0.3)",
+                    font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+                    height=280,
+                    margin=dict(t=10, b=10, l=10, r=10),
+                    xaxis=dict(title="Dia da Semana"),
+                    yaxis=dict(title="Taxa de Anomalia (%)")
+                )
+                fig_day.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)")
+                fig_day.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)")
+                st.plotly_chart(fig_day, use_container_width=True)
+            else:
+                st.info("Distribuição semanal indisponível.")
+
+
