@@ -4,7 +4,8 @@ from src.data.extractor import BinanceExtractor
 from src.engine.analytics import FinanceEngine
 from src.engine.forecasting import ForecastEngine
 from src.engine.anomaly_prob import AnomalyProbabilityEngine
-from src.ui.components import apply_custom_css, render_metrics_cards, render_candlestick_chart, render_forecast_tab, render_anomaly_probability_tab
+from src.engine.anomaly_trend import AnomalyTrendEngine
+from src.ui.components import apply_custom_css, render_metrics_cards, render_candlestick_chart, render_forecast_tab, render_anomaly_probability_tab, render_anomaly_trend_tab
 
 # Configuração de Logs
 logging.basicConfig(level=logging.INFO)
@@ -168,10 +169,11 @@ def main() -> None:
         processed_df = st.session_state["processed_data"]
         
         # Criação das Abas na parte superior do Dashboard
-        tab1, tab2, tab3 = st.tabs([
+        tab1, tab2, tab3, tab4 = st.tabs([
             "📊 Monitoramento de Volatilidade", 
             "🔮 Previsão Probabilística", 
-            "⚡ Probabilidade de Anomalias"
+            "⚡ Probabilidade de Anomalias",
+            "📈 Padrões de Volatilidade"
         ])
         
         with tab1:
@@ -219,6 +221,20 @@ def main() -> None:
                     render_anomaly_probability_tab(processed_df, anomaly_metrics, z_threshold=z_threshold)
                 except Exception as err:
                     st.error(f"⚠️ Erro ao calcular as probabilidades de anomalia: {err}")
+                    
+        with tab4:
+            st.markdown("### 📈 Reconhecimento de Padrões e Projeção de Tendências")
+            st.markdown("Previsões baseadas na resposta histórica de preços pós-anomalias (Estudo de Eventos de Alta e Baixa Volatilidade).")
+            
+            # Execução do motor de padrões de tendência por anomalias
+            trend_engine = AnomalyTrendEngine()
+            with st.spinner("Analisando padrões históricos pós-evento..."):
+                try:
+                    event_stats = trend_engine.analyze_patterns(processed_df, max_steps=5)
+                    current_forecast = trend_engine.generate_current_forecast(processed_df, event_stats, lookback=10)
+                    render_anomaly_trend_tab(processed_df, event_stats, current_forecast)
+                except Exception as err:
+                    st.error(f"⚠️ Erro ao analisar padrões de tendência: {err}")
         
         # Rodapé com o carimbo de data/hora
         last_update_utc = processed_df["timestamp"].iloc[-1].strftime("%Y-%m-%d %H:%M:%S")

@@ -827,3 +827,185 @@ def render_anomaly_probability_tab(df: pd.DataFrame, metrics: dict, z_threshold:
                 st.info("Distribuição semanal indisponível.")
 
 
+def render_anomaly_trend_tab(df: pd.DataFrame, event_stats: dict, current_forecast: dict) -> None:
+    """
+    Renderiza a aba de Padrões e Projeção de Tendência baseada em anomalias.
+    Exibe a previsão ativa do evento atual (se houver) e estatísticas históricas de retornos médios.
+    """
+    if df is None or df.empty or event_stats is None or current_forecast is None:
+        st.warning("Dados insuficientes para renderizar a projeção por anomalias.")
+        return
+
+    fmt_price = lambda x: f"${x:,.2f}" if x >= 1.0 else f"${x:.6f}"
+
+    # 1. Seção de Previsão Ativa
+    st.markdown("#### 🎯 Projeção de Tendência Ativa (Efeito de Anomalia Recente)")
+    
+    if current_forecast.get("active", False):
+        direction = current_forecast["direction"]
+        color = "var(--neon-cyan)" if direction == "ALTA" else "var(--neon-pink)"
+        shadow = "0 0 15px #00ffcc" if direction == "ALTA" else "0 0 15px #ff0055"
+        
+        col1, col2, col3 = st.columns([1, 1.5, 1])
+        
+        with col1:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid {color}; box-shadow: inset 0 0 10px {color}10; height: 100%;">
+                <div class="kpi-title">Tendência Projetada</div>
+                <div class="kpi-value" style="color: {color}; text-shadow: {shadow}; font-weight: 700; font-size: 2.2rem; margin-top: 10px;">{direction}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a; margin-top: 5px;">Baseado em Padrão Histórico</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col2:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #ffff00; height: 100%;">
+                <div class="kpi-title">Alvo e Faixa de Preço Estimados</div>
+                <div class="kpi-value" style="color: #ffffff; font-size: 2rem;">{fmt_price(current_forecast["target_price"])}</div>
+                <div class="kpi-subtitle" style="color: #ffff00;">
+                    Margem: {fmt_price(current_forecast["lower_target"])} a {fmt_price(current_forecast["upper_target"])}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col3:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #e2e8f0; height: 100%;">
+                <div class="kpi-title">Grau de Confiança</div>
+                <div class="kpi-value" style="color: #ffffff; font-size: 2.2rem;">{current_forecast["confidence"]:.1f}%</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Amostra: {current_forecast["historical_events"]} eventos anteriores</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        # Alerta detalhado do evento
+        st.write("")
+        st.info(
+            f"⚡ **Efeito Ativo:** Uma anomalia do tipo **{current_forecast['anomaly_type']}** ocorreu há **{current_forecast['elapsed_candles']}** candles atrás "
+            f"(Preço de Fechamento na anomalia: **{fmt_price(current_forecast['anomaly_price'])}** em **{current_forecast['anomaly_timestamp']} UTC**). "
+            f"O tempo restante estimado para o padrão se concretizar é de **{current_forecast['remaining_candles']}** candles."
+        )
+    else:
+        # Mensagem estilizada indicando ausência de anomalia ativa
+        st.markdown(f"""
+        <div class="kpi-card" style="border: 1px dashed rgba(255,255,255,0.15); padding: 30px; text-align: center; margin-bottom: 25px;">
+            <div class="kpi-title" style="font-size: 0.95rem; color: #8a8d9a; letter-spacing: 2px;">STATUS DO MERCADO</div>
+            <div class="kpi-value" style="color: var(--neon-cyan); text-shadow: 0 0 10px rgba(0, 255, 204, 0.4); font-size: 1.6rem; font-weight: 700; margin: 12px 0;">ESTÁVEL / NEUTRO</div>
+            <div class="kpi-subtitle" style="color: #8a8d9a; max-width: 600px; margin: 0 auto;">
+                {current_forecast.get("reason", "Nenhuma anomalia de volatilidade ativa nos últimos candles. O mercado está operando em equilíbrio, aguardando novos picos de Z-Score para projeção de padrões.")}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.write("")
+    
+    # 2. Estatísticas históricas e caminhos de preço médios
+    st.markdown("#### 📊 Estudo de Eventos Históricos ( Forward Returns )")
+    st.write("Estatísticas acumuladas das anomalias passadas mapeadas e seus respectivos comportamentos pós-evento.")
+
+    col_pos, col_neg = st.columns(2)
+    max_steps = event_stats["max_steps"]
+
+    with col_pos:
+        pos = event_stats["pos_anomaly"]
+        st.markdown("##### 🟢 Anomalias de Alta (Z-Score > 0)")
+        p_col1, p_col2, p_col3 = st.columns(3)
+        with p_col1:
+            st.metric("Eventos Encontrados", pos["count"])
+        with p_col2:
+            st.metric("Retorno Médio (t+5)", f"{pos['mean_returns'][max_steps-1]:+.2f}%")
+        with p_col3:
+            st.metric("Taxa de Alta (t+5)", f"{pos['win_rates'][max_steps-1]:.1f}%")
+
+    with col_neg:
+        neg = event_stats["neg_anomaly"]
+        st.markdown("##### 🔴 Anomalias de Baixa (Z-Score < 0)")
+        n_col1, n_col2, n_col3 = st.columns(3)
+        with n_col1:
+            st.metric("Eventos Encontrados", neg["count"])
+        with n_col2:
+            st.metric("Retorno Médio (t+5)", f"{neg['mean_returns'][max_steps-1]:+.2f}%")
+        with n_col3:
+            st.metric("Taxa de Queda (t+5)", f"{neg['win_rates'][max_steps-1]:.1f}%")
+
+    st.write("")
+    
+    # 3. Gráfico do caminho médio do preço (Event Study Plot)
+    st.markdown("##### 📈 Comportamento Médio do Preço Pós-Evento (1 a 5 períodos)")
+    st.write("Evolução percentual média acumulada do preço após a sinalização de uma anomalia (Ponto 0 é o preço no candle da anomalia).")
+
+    x_steps = [f"t+{i}" for i in range(max_steps + 1)]
+    x_indices = list(range(max_steps + 1))
+    
+    # Adicionamos o ponto 0 ao início das séries
+    y_pos = [0.0] + pos["mean_returns"]
+    y_neg = [0.0] + neg["mean_returns"]
+
+    fig_study = go.Figure()
+    
+    # Linha zero de referência
+    fig_study.add_trace(go.Scatter(
+        x=x_indices,
+        y=[0.0] * (max_steps + 1),
+        mode="lines",
+        line=dict(color="rgba(226, 232, 240, 0.25)", width=1, dash="dash"),
+        showlegend=False,
+        hoverinfo="skip"
+    ))
+
+    # Caminho após anomalias positivas (Alta)
+    fig_study.add_trace(go.Scatter(
+        x=x_indices,
+        y=y_pos,
+        mode="lines+markers",
+        name="Após Anomalia de Alta (+Z)",
+        line=dict(color="#00ffcc", width=2.5),
+        marker=dict(color="#00ffcc", size=8),
+        hovertemplate="<b>Período:</b> %{x}<br><b>Retorno Médio:</b> %{y:+.2f}%<extra></extra>"
+    ))
+
+    # Caminho após anomalias negativas (Baixa)
+    fig_study.add_trace(go.Scatter(
+        x=x_indices,
+        y=y_neg,
+        mode="lines+markers",
+        name="Após Anomalia de Baixa (-Z)",
+        line=dict(color="#ff0055", width=2.5),
+        marker=dict(color="#ff0055", size=8),
+        hovertemplate="<b>Período:</b> %{x}<br><b>Retorno Médio:</b> %{y:+.2f}%<extra></extra>"
+    ))
+
+    fig_study.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(12, 13, 20, 0.0)",
+        plot_bgcolor="rgba(12, 13, 20, 0.3)",
+        font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+        height=350,
+        margin=dict(t=15, b=10, l=10, r=10),
+        xaxis=dict(
+            title="Períodos Pós-Evento (Candles futuros)",
+            tickmode="array",
+            tickvals=x_indices,
+            ticktext=x_steps
+        ),
+        yaxis=dict(
+            title="Retorno Médio Acumulado (%)",
+            tickformat="+.2f%"
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(size=11)
+        )
+    )
+    
+    fig_study.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+    fig_study.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+    
+    st.plotly_chart(fig_study, use_container_width=True)
+
+
+
