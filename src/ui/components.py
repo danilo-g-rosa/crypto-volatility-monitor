@@ -334,10 +334,10 @@ def render_candlestick_chart(df: pd.DataFrame, z_threshold: float = 2.0) -> None
                 mode="markers",
                 name="Anomalias",
                 marker=dict(
-                    color="#ff0055",
+                    color="#ffff00",
                     size=10,
                     symbol="circle-open-dot",
-                    line=dict(color="#ff0055", width=2)
+                    line=dict(color="#ffff00", width=2)
                 ),
                 hovertemplate="<b>Anomalia de Preço</b><br>Data: %{x}<br>Fechamento: %{y:.2f}<extra></extra>"
             ),
