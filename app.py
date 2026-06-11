@@ -5,6 +5,8 @@ from src.engine.analytics import FinanceEngine
 from src.engine.forecasting import ForecastEngine
 from src.engine.anomaly_prob import AnomalyProbabilityEngine
 from src.engine.anomaly_trend import AnomalyTrendEngine
+from src.engine.monte_carlo import MonteCarloEngine
+from src.engine.garch import GarchEngine
 from src.ui.components import apply_custom_css, render_metrics_cards, render_candlestick_chart, render_forecast_tab, render_anomaly_probability_tab, render_anomaly_trend_tab
 
 # Configuração de Logs
@@ -200,12 +202,14 @@ def main() -> None:
                 help="Quantidade de períodos futuros para projetar os preços."
             )
             
-            # Execução do motor de previsão
+            # Execução do motor de previsão e simulação de Monte Carlo
             forecaster = ForecastEngine(steps=steps)
-            with st.spinner("Computando modelos preditivos..."):
+            mc_engine = MonteCarloEngine()
+            with st.spinner("Computando modelos preditivos e simulações..."):
                 try:
                     forecast_df = forecaster.run_forecast(processed_df)
-                    render_forecast_tab(processed_df, forecast_df, steps=steps)
+                    mc_result = mc_engine.run_simulation(processed_df, steps=steps, num_paths=150)
+                    render_forecast_tab(processed_df, forecast_df, steps=steps, mc_result=mc_result)
                 except Exception as err:
                     st.error(f"⚠️ Erro ao calcular as previsões: {err}")
                     
@@ -213,12 +217,14 @@ def main() -> None:
             st.markdown("### ⚡ Análise de Risco e Probabilidade de Anomalias")
             st.markdown("Estatísticas baseadas na distribuição e transição de anomalias computadas em tempo real.")
             
-            # Execução do motor probabilístico de anomalias
+            # Execução do motor probabilístico de anomalias e GARCH
             anomaly_engine = AnomalyProbabilityEngine()
-            with st.spinner("Computando modelos probabilísticos de risco..."):
+            garch_engine = GarchEngine()
+            with st.spinner("Computando modelos probabilísticos de risco e GARCH..."):
                 try:
                     anomaly_metrics = anomaly_engine.calculate_metrics(processed_df)
-                    render_anomaly_probability_tab(processed_df, anomaly_metrics, z_threshold=z_threshold)
+                    garch_result = garch_engine.estimate_garch(processed_df, steps=15)
+                    render_anomaly_probability_tab(processed_df, anomaly_metrics, z_threshold=z_threshold, garch_result=garch_result)
                 except Exception as err:
                     st.error(f"⚠️ Erro ao calcular as probabilidades de anomalia: {err}")
                     

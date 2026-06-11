@@ -437,7 +437,7 @@ def render_candlestick_chart(df: pd.DataFrame, z_threshold: float = 2.0) -> None
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_forecast_tab(df: pd.DataFrame, forecast_df: pd.DataFrame, steps: int) -> None:
+def render_forecast_tab(df: pd.DataFrame, forecast_df: pd.DataFrame, steps: int, mc_result: dict = None) -> None:
     """
     Renderiza a aba de Previsão Probabilística contendo cards de tendência,
     dados projetados e o gráfico Plotly estendido com intervalos de confiança.
@@ -634,8 +634,93 @@ def render_forecast_tab(df: pd.DataFrame, forecast_df: pd.DataFrame, steps: int)
     
     st.plotly_chart(fig, use_container_width=True)
 
+    # 5. Seção da Simulação de Monte Carlo
+    if mc_result is not None:
+        st.write("")
+        st.markdown("##### 🎲 Caminhos Simulados de Preço (Simulação de Monte Carlo)")
+        st.write("Exibe 150 caminhos futuros simulados aleatoriamente com base na volatilidade e drift históricos.")
+        
+        fig_mc = go.Figure()
+        
+        # Plotar caminhos simulados
+        timestamps_mc = mc_result["timestamps"]
+        paths = mc_result["paths"]
+        
+        # Mostra apenas um subconjunto de caminhos para não travar a renderização do Plotly (ex: 50 caminhos)
+        num_to_plot = min(50, len(paths[0]))
+        for i in range(num_to_plot):
+            path_y = [paths[t][i] for t in range(len(paths))]
+            fig_mc.add_trace(go.Scatter(
+                x=timestamps_mc,
+                y=path_y,
+                mode="lines",
+                line=dict(color="rgba(138, 141, 154, 0.08)", width=1),
+                showlegend=False,
+                hoverinfo="skip"
+            ))
+            
+        # Sombreado da área de confiança 5% - 95%
+        fig_mc.add_trace(go.Scatter(
+            x=timestamps_mc,
+            y=mc_result["percentile_95"],
+            mode="lines",
+            line=dict(width=0),
+            showlegend=False,
+            hoverinfo="skip"
+        ))
+        
+        fig_mc.add_trace(go.Scatter(
+            x=timestamps_mc,
+            y=mc_result["percentile_5"],
+            mode="lines",
+            fill="tonexty",
+            fillcolor="rgba(255, 235, 59, 0.05)", # sombreado amarelo
+            name="Intervalo de Caminhos (5% - 95%)",
+            hoverinfo="skip"
+        ))
+        
+        # Mediana simulada
+        fig_mc.add_trace(go.Scatter(
+            x=timestamps_mc,
+            y=mc_result["percentile_50"],
+            name="Caminho Mediano (50%)",
+            line=dict(color="#ffff00", width=2.5)
+        ))
+        
+        # Histórico recente
+        fig_mc.add_trace(go.Scatter(
+            x=hist_subset["timestamp"],
+            y=hist_subset["close"],
+            name="Histórico Real",
+            line=dict(color="#ffffff", width=2)
+        ))
+        
+        fig_mc.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(12, 13, 20, 0.0)",
+            plot_bgcolor="rgba(12, 13, 20, 0.3)",
+            font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+            hovermode="x unified",
+            margin=dict(t=15, b=10, l=10, r=10),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+                bgcolor="rgba(0,0,0,0)",
+                font=dict(size=11)
+            ),
+            height=400
+        )
+        
+        fig_mc.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+        fig_mc.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+        
+        st.plotly_chart(fig_mc, use_container_width=True)
 
-def render_anomaly_probability_tab(df: pd.DataFrame, metrics: dict, z_threshold: float) -> None:
+
+def render_anomaly_probability_tab(df: pd.DataFrame, metrics: dict, z_threshold: float, garch_result: dict = None) -> None:
     """
     Renderiza a aba de Análise de Risco e Probabilidade de Anomalias.
     Exibe indicadores de risco imediato, matriz de transição de Markov e curva de Poisson.
@@ -825,6 +910,120 @@ def render_anomaly_probability_tab(df: pd.DataFrame, metrics: dict, z_threshold:
                 st.plotly_chart(fig_day, use_container_width=True)
             else:
                 st.info("Distribuição semanal indisponível.")
+
+    # 4. Seção do Modelo GARCH(1,1)
+    if garch_result is not None:
+        st.write("")
+        st.markdown("#### 📈 Previsão de Volatilidade Dinâmica GARCH(1,1)")
+        st.write("Estima a variação de risco condicional com reversão automática para a média de longo prazo.")
+        
+        # Colunas de métricas do GARCH
+        g_col1, g_col2, g_col3, g_col4 = st.columns(4)
+        
+        with g_col1:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid var(--neon-cyan);">
+                <div class="kpi-title">Volatilidade Atual (GARCH)</div>
+                <div class="kpi-value" style="color: var(--neon-cyan);">{garch_result["current_vol"]:.2f}%</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Último Candle Calculado</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with g_col2:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #e2e8f0;">
+                <div class="kpi-title">Volatilidade de Longo Prazo</div>
+                <div class="kpi-value" style="color: #ffffff;">{garch_result["vol_long_term"]:.2f}%</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Média Estacionária (Uncondicional)</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with g_col3:
+            persistence = garch_result["persistence"]
+            p_desc = "Estável (Reversão à Média)" if persistence < 1.0 else "Instável (Passeio Aleatório)"
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #ffff00;">
+                <div class="kpi-title">Persistência da Volatilidade</div>
+                <div class="kpi-value" style="color: #ffff00;">{persistence:.4f}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">{p_desc}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with g_col4:
+            opt_status = "SUCESSO" if garch_result["success"] else "FALLBACK"
+            opt_color = "var(--neon-cyan)" if garch_result["success"] else "var(--neon-pink)"
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid {opt_color};">
+                <div class="kpi-title">Calibração GARCH MLE</div>
+                <div class="kpi-value" style="color: {opt_color};">{opt_status}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">ARCH (α): {garch_result["alpha"]:.3f} | GARCH (β): {garch_result["beta"]:.3f}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        st.write("")
+        
+        # Gráfico da Volatilidade GARCH
+        fig_garch = go.Figure()
+        
+        # Histórico recente da volatilidade (últimos 45 candles)
+        history_len = min(45, len(garch_result["history_vol"]))
+        hist_vol = garch_result["history_vol"][-history_len:]
+        hist_timestamps = df["timestamp"].iloc[-history_len:]
+        
+        fig_garch.add_trace(go.Scatter(
+            x=hist_timestamps,
+            y=hist_vol,
+            name="Volatilidade Condicional Estimada",
+            line=dict(color="#ffffff", width=2)
+        ))
+        
+        # Conexão entre o último ponto histórico e o primeiro futuro
+        last_hist_time = df["timestamp"].iloc[-1]
+        last_hist_vol = garch_result["history_vol"][-1]
+        
+        future_x = [last_hist_time] + garch_result["timestamps"]
+        future_y = [last_hist_vol] + garch_result["forecast_vol"]
+        
+        # Projeção futura da volatilidade
+        fig_garch.add_trace(go.Scatter(
+            x=future_x,
+            y=future_y,
+            name="Projeção GARCH(1,1)",
+            line=dict(color="#ffff00", width=2.5)
+        ))
+        
+        # Linha horizontal de longo prazo
+        fig_garch.add_trace(go.Scatter(
+            x=future_x,
+            y=[garch_result["vol_long_term"]] * len(future_x),
+            name="Volatilidade de Longo Prazo",
+            line=dict(color="rgba(255, 0, 85, 0.5)", width=1.5, dash="dash")
+        ))
+        
+        fig_garch.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(12, 13, 20, 0.0)",
+            plot_bgcolor="rgba(12, 13, 20, 0.3)",
+            font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+            hovermode="x unified",
+            margin=dict(t=15, b=10, l=10, r=10),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+                bgcolor="rgba(0,0,0,0)",
+                font=dict(size=11)
+            ),
+            height=350,
+            yaxis=dict(title="Volatilidade (%)", ticksuffix="%")
+        )
+        
+        fig_garch.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+        fig_garch.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+        
+        st.plotly_chart(fig_garch, use_container_width=True)
 
 
 def render_anomaly_trend_tab(df: pd.DataFrame, event_stats: dict, current_forecast: dict) -> None:
