@@ -7,7 +7,19 @@ from src.engine.anomaly_prob import AnomalyProbabilityEngine
 from src.engine.anomaly_trend import AnomalyTrendEngine
 from src.engine.monte_carlo import MonteCarloEngine
 from src.engine.garch import GarchEngine
-from src.ui.components import apply_custom_css, render_metrics_cards, render_candlestick_chart, render_forecast_tab, render_anomaly_probability_tab, render_anomaly_trend_tab
+from src.engine.merton_jump import MertonJumpEngine
+from src.engine.kalman_filter import KalmanFilterEngine
+from src.engine.particle_filter import ParticleFilterEngine
+from src.engine.evt_gmm import EVTGMMEngine
+from src.engine.ising_model import IsingMarketEngine
+from src.engine.sir_model import SIRMarketEngine
+from src.engine.lotka_volterra import LotkaVolterraEngine
+from src.engine.pomdp import POMDPEngine
+from src.ui.components import (
+    apply_custom_css, render_metrics_cards, render_candlestick_chart,
+    render_forecast_tab, render_anomaly_probability_tab, render_anomaly_trend_tab,
+    render_interdisciplinary_tab, render_decision_tab
+)
 
 # Configuração de Logs
 logging.basicConfig(level=logging.INFO)
@@ -170,12 +182,14 @@ def main() -> None:
     if st.session_state["processed_data"] is not None:
         processed_df = st.session_state["processed_data"]
         
-        # Criação das Abas na parte superior do Dashboard
-        tab1, tab2, tab3, tab4 = st.tabs([
+        # Criação das 6 Abas na parte superior do Dashboard
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📊 Monitoramento de Volatilidade", 
             "🔮 Previsão Probabilística", 
             "⚡ Probabilidade de Anomalias",
-            "📈 Padrões de Volatilidade"
+            "📈 Padrões de Volatilidade",
+            "🧬 Modelos Interdisciplinares",
+            "🧠 Inteligência de Decisão"
         ])
         
         with tab1:
@@ -202,31 +216,48 @@ def main() -> None:
                 help="Quantidade de períodos futuros para projetar os preços."
             )
             
-            # Execução do motor de previsão e simulação de Monte Carlo
+            # Execução do motor de previsão, Monte Carlo, Merton Jump e Kalman Filter
             forecaster = ForecastEngine(steps=steps)
             mc_engine = MonteCarloEngine()
-            with st.spinner("Computando modelos preditivos e simulações..."):
+            merton_engine = MertonJumpEngine()
+            kalman_engine = KalmanFilterEngine()
+            with st.spinner("Computando modelos preditivos e simulações avançadas..."):
                 try:
                     forecast_df = forecaster.run_forecast(processed_df)
                     mc_result = mc_engine.run_simulation(processed_df, steps=steps, num_paths=150)
-                    render_forecast_tab(processed_df, forecast_df, steps=steps, mc_result=mc_result)
+                    merton_result = merton_engine.run_simulation(processed_df, steps=steps, num_paths=150)
+                    kalman_result = kalman_engine.run_filter(processed_df, steps=steps)
+                    render_forecast_tab(
+                        processed_df, forecast_df, steps=steps, 
+                        mc_result=mc_result, merton_result=merton_result, 
+                        kalman_result=kalman_result
+                    )
                 except Exception as err:
                     st.error(f"⚠️ Erro ao calcular as previsões: {err}")
+                    logger.error(f"Erro na aba de previsão: {err}", exc_info=True)
                     
         with tab3:
             st.markdown("### ⚡ Análise de Risco e Probabilidade de Anomalias")
             st.markdown("Estatísticas baseadas na distribuição e transição de anomalias computadas em tempo real.")
             
-            # Execução do motor probabilístico de anomalias e GARCH
+            # Execução dos motores probabilísticos de anomalias, GARCH, Particle Filter e EVT/GMM
             anomaly_engine = AnomalyProbabilityEngine()
             garch_engine = GarchEngine()
-            with st.spinner("Computando modelos probabilísticos de risco e GARCH..."):
+            pf_engine = ParticleFilterEngine()
+            evt_engine = EVTGMMEngine()
+            with st.spinner("Computando modelos probabilísticos de risco avançados..."):
                 try:
                     anomaly_metrics = anomaly_engine.calculate_metrics(processed_df)
                     garch_result = garch_engine.estimate_garch(processed_df, steps=15)
-                    render_anomaly_probability_tab(processed_df, anomaly_metrics, z_threshold=z_threshold, garch_result=garch_result)
+                    pf_result = pf_engine.run_filter(processed_df, num_particles=300)
+                    evt_result = evt_engine.run_analysis(processed_df)
+                    render_anomaly_probability_tab(
+                        processed_df, anomaly_metrics, z_threshold=z_threshold,
+                        garch_result=garch_result, pf_result=pf_result, evt_result=evt_result
+                    )
                 except Exception as err:
                     st.error(f"⚠️ Erro ao calcular as probabilidades de anomalia: {err}")
+                    logger.error(f"Erro na aba de anomalias: {err}", exc_info=True)
                     
         with tab4:
             st.markdown("### 📈 Reconhecimento de Padrões e Projeção de Tendências")
@@ -241,6 +272,39 @@ def main() -> None:
                     render_anomaly_trend_tab(processed_df, event_stats, current_forecast)
                 except Exception as err:
                     st.error(f"⚠️ Erro ao analisar padrões de tendência: {err}")
+                    logger.error(f"Erro na aba de padrões: {err}", exc_info=True)
+
+        with tab5:
+            st.markdown("### 🧬 Modelos Interdisciplinares Aplicados ao Mercado")
+            st.markdown("Analogias científicas de Física Estatística, Epidemiologia e Ecologia adaptadas para análise de dinâmicas de mercado.")
+            
+            # Execução dos motores interdisciplinares: Ising, SIR, Lotka-Volterra
+            ising_engine = IsingMarketEngine()
+            sir_engine = SIRMarketEngine()
+            lv_engine = LotkaVolterraEngine()
+            with st.spinner("Simulando modelos interdisciplinares (Ising, SIR, Lotka-Volterra)..."):
+                try:
+                    ising_result = ising_engine.run_simulation(processed_df, grid_size=20, mc_steps=100)
+                    sir_result = sir_engine.run_simulation(processed_df, projection_steps=30)
+                    lv_result = lv_engine.run_simulation(processed_df, projection_steps=30)
+                    render_interdisciplinary_tab(processed_df, ising_result, sir_result, lv_result)
+                except Exception as err:
+                    st.error(f"⚠️ Erro ao executar modelos interdisciplinares: {err}")
+                    logger.error(f"Erro na aba interdisciplinar: {err}", exc_info=True)
+
+        with tab6:
+            st.markdown("### 🧠 Inteligência de Decisão via POMDP")
+            st.markdown("Processo de Decisão de Markov Parcialmente Observável para inferência de estado oculto do mercado e recomendação de ação.")
+            
+            # Execução do motor POMDP
+            pomdp_engine = POMDPEngine()
+            with st.spinner("Computando modelo de decisão POMDP..."):
+                try:
+                    pomdp_result = pomdp_engine.run_analysis(processed_df)
+                    render_decision_tab(processed_df, pomdp_result)
+                except Exception as err:
+                    st.error(f"⚠️ Erro ao executar o modelo POMDP: {err}")
+                    logger.error(f"Erro na aba POMDP: {err}", exc_info=True)
         
         # Rodapé com o carimbo de data/hora
         last_update_utc = processed_df["timestamp"].iloc[-1].strftime("%Y-%m-%d %H:%M:%S")

@@ -437,7 +437,7 @@ def render_candlestick_chart(df: pd.DataFrame, z_threshold: float = 2.0) -> None
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_forecast_tab(df: pd.DataFrame, forecast_df: pd.DataFrame, steps: int, mc_result: dict = None) -> None:
+def render_forecast_tab(df: pd.DataFrame, forecast_df: pd.DataFrame, steps: int, mc_result: dict = None, merton_result: dict = None, kalman_result: dict = None) -> None:
     """
     Renderiza a aba de Previsão Probabilística contendo cards de tendência,
     dados projetados e o gráfico Plotly estendido com intervalos de confiança.
@@ -719,8 +719,217 @@ def render_forecast_tab(df: pd.DataFrame, forecast_df: pd.DataFrame, steps: int,
         
         st.plotly_chart(fig_mc, use_container_width=True)
 
+    # 6. Seção Merton Jump-Diffusion
+    if merton_result is not None:
+        st.write("")
+        st.markdown("##### 💥 Simulação de Merton Jump-Diffusion (Saltos de Preço)")
+        st.write("Extensão do Monte Carlo com saltos estocásticos via Processo de Poisson Composto — modela crashes e pumps súbitos.")
+        
+        # KPIs do Merton
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        with m_col1:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #e040fb;">
+                <div class="kpi-title">Frequência de Saltos (λ)</div>
+                <div class="kpi-value" style="color: #e040fb;">{merton_result.get('lambda_jumps', 0):.4f}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Saltos por período</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with m_col2:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #e040fb;">
+                <div class="kpi-title">Magnitude Média (μ_J)</div>
+                <div class="kpi-value" style="color: #ffffff;">{merton_result.get('mu_jump', 0)*100:+.2f}%</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Tamanho médio do salto</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with m_col3:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #e040fb;">
+                <div class="kpi-title">Volatilidade do Salto (σ_J)</div>
+                <div class="kpi-value" style="color: #ffffff;">{merton_result.get('sigma_jump', 0)*100:.2f}%</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Dispersão dos saltos</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with m_col4:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #e040fb;">
+                <div class="kpi-title">Saltos Médios por Caminho</div>
+                <div class="kpi-value" style="color: #ffffff;">{merton_result.get('avg_jumps_per_path', 0):.1f}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Em {steps} períodos simulados</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.write("")
+        
+        # Gráfico Merton
+        fig_merton = go.Figure()
+        timestamps_m = merton_result["timestamps"]
+        
+        # Banda de confiança Merton
+        fig_merton.add_trace(go.Scatter(
+            x=timestamps_m, y=merton_result["percentile_95"],
+            mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"
+        ))
+        fig_merton.add_trace(go.Scatter(
+            x=timestamps_m, y=merton_result["percentile_5"],
+            mode="lines", fill="tonexty",
+            fillcolor="rgba(224, 64, 251, 0.08)",
+            name="Intervalo Merton (5%-95%)", hoverinfo="skip"
+        ))
+        
+        # Mediana Merton
+        fig_merton.add_trace(go.Scatter(
+            x=timestamps_m, y=merton_result["percentile_50"],
+            name="Mediana Merton (com Saltos)",
+            line=dict(color="#e040fb", width=2.5)
+        ))
+        
+        # GBM puro para comparação
+        if "gbm_only_median" in merton_result:
+            fig_merton.add_trace(go.Scatter(
+                x=timestamps_m, y=merton_result["gbm_only_median"],
+                name="GBM Puro (sem Saltos)",
+                line=dict(color="#8a8d9a", width=1.5, dash="dot")
+            ))
+        
+        # Histórico
+        fig_merton.add_trace(go.Scatter(
+            x=hist_subset["timestamp"], y=hist_subset["close"],
+            name="Histórico Real", line=dict(color="#ffffff", width=2)
+        ))
+        
+        fig_merton.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(12, 13, 20, 0.0)",
+            plot_bgcolor="rgba(12, 13, 20, 0.3)",
+            font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+            hovermode="x unified",
+            margin=dict(t=15, b=10, l=10, r=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+            height=400
+        )
+        fig_merton.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+        fig_merton.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+        st.plotly_chart(fig_merton, use_container_width=True)
 
-def render_anomaly_probability_tab(df: pd.DataFrame, metrics: dict, z_threshold: float, garch_result: dict = None) -> None:
+    # 7. Seção Filtro de Kalman
+    if kalman_result is not None:
+        st.write("")
+        st.markdown("##### 🎯 Filtro de Kalman (Preço Denoised e Projeção Adaptativa)")
+        st.write("Estimador bayesiano linear que filtra o ruído do preço observado para revelar a tendência real subjacente.")
+        
+        # KPIs Kalman
+        k_col1, k_col2 = st.columns(2)
+        with k_col1:
+            noise_r = kalman_result.get("noise_ratio", 0)
+            noise_label = "Alto Ruído" if noise_r > 5 else ("Moderado" if noise_r > 1 else "Baixo Ruído")
+            noise_color = "#ff0055" if noise_r > 5 else ("#ffff00" if noise_r > 1 else "#00ffcc")
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid {noise_color};">
+                <div class="kpi-title">Razão Ruído/Processo (R/Q)</div>
+                <div class="kpi-value" style="color: {noise_color};">{noise_r:.2f}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">{noise_label}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with k_col2:
+            if kalman_result.get("forecast_prices"):
+                kalman_target = kalman_result["forecast_prices"][-1]
+                fmt_kt = f"${kalman_target:,.2f}" if kalman_target >= 1.0 else f"${kalman_target:.6f}"
+            else:
+                fmt_kt = "N/A"
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #40c4ff;">
+                <div class="kpi-title">Preço Projetado (Kalman)</div>
+                <div class="kpi-value" style="color: #40c4ff;">{fmt_kt}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Em {steps} períodos</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.write("")
+        
+        # Gráfico Kalman
+        fig_kalman = go.Figure()
+        
+        # Preço real (últimos 60)
+        fig_kalman.add_trace(go.Scatter(
+            x=hist_subset["timestamp"], y=hist_subset["close"],
+            name="Preço Observado", line=dict(color="rgba(255,255,255,0.4)", width=1)
+        ))
+        
+        # Preço filtrado
+        filtered_len = len(kalman_result["filtered_prices"])
+        kalman_hist_idx = max(0, filtered_len - len(hist_subset))
+        filtered_slice = kalman_result["filtered_prices"][kalman_hist_idx:]
+        upper_slice = kalman_result.get("filtered_upper", [])[kalman_hist_idx:]
+        lower_slice = kalman_result.get("filtered_lower", [])[kalman_hist_idx:]
+        
+        if len(filtered_slice) == len(hist_subset):
+            fig_kalman.add_trace(go.Scatter(
+                x=hist_subset["timestamp"], y=upper_slice,
+                mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"
+            ))
+            fig_kalman.add_trace(go.Scatter(
+                x=hist_subset["timestamp"], y=lower_slice,
+                mode="lines", fill="tonexty",
+                fillcolor="rgba(64, 196, 255, 0.06)",
+                name="Banda de Incerteza Kalman", hoverinfo="skip"
+            ))
+            fig_kalman.add_trace(go.Scatter(
+                x=hist_subset["timestamp"], y=filtered_slice,
+                name="Preço Filtrado (Kalman)",
+                line=dict(color="#40c4ff", width=2.5)
+            ))
+        
+        # Projeção futura
+        if kalman_result.get("forecast_prices") and kalman_result.get("forecast_timestamps"):
+            fc_ts = kalman_result["forecast_timestamps"]
+            fc_p = kalman_result["forecast_prices"]
+            fc_u = kalman_result.get("forecast_upper", fc_p)
+            fc_l = kalman_result.get("forecast_lower", fc_p)
+            
+            # Conectar ao último ponto
+            import pandas as _pd
+            last_ts = hist_subset["timestamp"].iloc[-1]
+            last_fp = filtered_slice[-1] if filtered_slice else float(hist_subset["close"].iloc[-1])
+            
+            conn_ts = [last_ts] + list(fc_ts)
+            conn_p = [last_fp] + list(fc_p)
+            conn_u = [last_fp] + list(fc_u)
+            conn_l = [last_fp] + list(fc_l)
+            
+            fig_kalman.add_trace(go.Scatter(
+                x=conn_ts, y=conn_u,
+                mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"
+            ))
+            fig_kalman.add_trace(go.Scatter(
+                x=conn_ts, y=conn_l,
+                mode="lines", fill="tonexty",
+                fillcolor="rgba(64, 196, 255, 0.12)",
+                name="Banda Projeção Kalman", hoverinfo="skip"
+            ))
+            fig_kalman.add_trace(go.Scatter(
+                x=conn_ts, y=conn_p,
+                name="Projeção Kalman",
+                line=dict(color="#40c4ff", width=2.5, dash="dash")
+            ))
+        
+        fig_kalman.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(12, 13, 20, 0.0)",
+            plot_bgcolor="rgba(12, 13, 20, 0.3)",
+            font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+            hovermode="x unified",
+            margin=dict(t=15, b=10, l=10, r=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+            height=400
+        )
+        fig_kalman.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+        fig_kalman.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+        st.plotly_chart(fig_kalman, use_container_width=True)
+
+
+def render_anomaly_probability_tab(df: pd.DataFrame, metrics: dict, z_threshold: float, garch_result: dict = None, pf_result: dict = None, evt_result: dict = None) -> None:
     """
     Renderiza a aba de Análise de Risco e Probabilidade de Anomalias.
     Exibe indicadores de risco imediato, matriz de transição de Markov e curva de Poisson.
@@ -1025,6 +1234,172 @@ def render_anomaly_probability_tab(df: pd.DataFrame, metrics: dict, z_threshold:
         
         st.plotly_chart(fig_garch, use_container_width=True)
 
+    # 5. Seção Filtro de Partículas
+    if pf_result is not None:
+        st.write("")
+        st.markdown("#### 🔬 Filtro de Partículas (Estimação Bayesiana de Volatilidade Latente)")
+        st.write("Sequential Monte Carlo com reamostragem sistemática para estimar o regime de volatilidade oculto do mercado.")
+        
+        pf_col1, pf_col2 = st.columns(2)
+        with pf_col1:
+            regime = pf_result.get("current_regime", "N/A")
+            regime_prob = pf_result.get("current_regime_prob", 0)
+            regime_color = "#ff0055" if regime == "HIGH_VOL" else "#00ffcc"
+            regime_label = "ALTA VOLATILIDADE" if regime == "HIGH_VOL" else "BAIXA VOLATILIDADE"
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid {regime_color}; box-shadow: inset 0 0 10px {regime_color}10;">
+                <div class="kpi-title">Regime de Volatilidade Latente</div>
+                <div class="kpi-value" style="color: {regime_color}; text-shadow: 0 0 10px {regime_color}; font-weight: 700;">{regime_label}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Probabilidade: {regime_prob*100:.1f}%</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with pf_col2:
+            ess_vals = pf_result.get("effective_sample_size", [])
+            avg_ess = np.mean(ess_vals) if ess_vals else 0
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #ffff00;">
+                <div class="kpi-title">Eficiência Amostral Média (ESS)</div>
+                <div class="kpi-value" style="color: #ffff00;">{avg_ess:.0f}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Qualidade da estimação</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.write("")
+        
+        # Gráfico do Filtro de Partículas
+        pf_timestamps = pf_result.get("timestamps", [])
+        pf_vol = pf_result.get("volatility_estimate", [])
+        pf_upper = pf_result.get("volatility_upper", [])
+        pf_lower = pf_result.get("volatility_lower", [])
+        
+        if pf_timestamps and pf_vol:
+            # Mostrar últimos 60
+            pf_show = min(60, len(pf_timestamps))
+            
+            fig_pf = go.Figure()
+            fig_pf.add_trace(go.Scatter(
+                x=pf_timestamps[-pf_show:], y=pf_upper[-pf_show:],
+                mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"
+            ))
+            fig_pf.add_trace(go.Scatter(
+                x=pf_timestamps[-pf_show:], y=pf_lower[-pf_show:],
+                mode="lines", fill="tonexty",
+                fillcolor="rgba(255, 235, 59, 0.08)",
+                name="Banda de Partículas (5%-95%)", hoverinfo="skip"
+            ))
+            fig_pf.add_trace(go.Scatter(
+                x=pf_timestamps[-pf_show:], y=pf_vol[-pf_show:],
+                name="Volatilidade Estimada (Posterior)",
+                line=dict(color="#ffff00", width=2.5),
+                hovertemplate="<b>Vol:</b> %{y:.4f}<extra></extra>"
+            ))
+            
+            fig_pf.update_layout(
+                template="plotly_dark",
+                paper_bgcolor="rgba(12, 13, 20, 0.0)",
+                plot_bgcolor="rgba(12, 13, 20, 0.3)",
+                font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+                hovermode="x unified",
+                margin=dict(t=15, b=10, l=10, r=10),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+                height=300,
+                yaxis=dict(title="Volatilidade Latente")
+            )
+            fig_pf.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+            fig_pf.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+            st.plotly_chart(fig_pf, use_container_width=True)
+
+    # 6. Seção EVT + GMM
+    if evt_result is not None:
+        st.write("")
+        st.markdown("#### 📊 Teoria de Valores Extremos (EVT) + Mistura Gaussiana (GMM)")
+        st.write("Modelagem de caudas pesadas via Distribuição de Pareto Generalizada e identificação de regimes via clusterização gaussiana.")
+        
+        evt_col1, evt_col2, evt_col3, evt_col4 = st.columns(4)
+        with evt_col1:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #ff0055;">
+                <div class="kpi-title">Value at Risk (95%)</div>
+                <div class="kpi-value" style="color: #ff0055;">{evt_result.get('var_95', 0)*100:.2f}%</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Perda máx. esperada</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with evt_col2:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #ff0055;">
+                <div class="kpi-title">CVaR / Expected Shortfall</div>
+                <div class="kpi-value" style="color: #ff0055;">{evt_result.get('cvar_95', 0)*100:.2f}%</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Perda média na cauda</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with evt_col3:
+            gpd_shape = evt_result.get("gpd_shape", 0)
+            shape_label = "Cauda Pesada" if gpd_shape > 0 else "Cauda Leve"
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #e040fb;">
+                <div class="kpi-title">Forma GPD (ξ)</div>
+                <div class="kpi-value" style="color: #e040fb;">{gpd_shape:.4f}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">{shape_label}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with evt_col4:
+            current_gmm_regime = evt_result.get("current_regime", "N/A")
+            gmm_prob = evt_result.get("current_regime_prob", 0)
+            gmm_color = "#ff0055" if "Alta" in current_gmm_regime else ("#ffff00" if "Média" in current_gmm_regime else "#00ffcc")
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid {gmm_color};">
+                <div class="kpi-title">Regime GMM Atual</div>
+                <div class="kpi-value" style="color: {gmm_color}; font-size: 1.4rem;">{current_gmm_regime.upper()}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Prob: {gmm_prob*100:.1f}%</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.write("")
+        
+        # Gráfico dos retornos com regimes GMM colorizados
+        returns = evt_result.get("returns", [])
+        regime_labels = evt_result.get("gmm_regime_labels", [])
+        
+        if returns and regime_labels and len(returns) == len(regime_labels):
+            show_n = min(60, len(returns))
+            ret_slice = returns[-show_n:]
+            lab_slice = regime_labels[-show_n:]
+            ts_slice = df["timestamp"].iloc[-show_n:] if len(df) >= show_n else df["timestamp"]
+            
+            fig_gmm = go.Figure()
+            
+            regime_colors = {
+                "Baixa Volatilidade": "#00ffcc",
+                "Média Volatilidade": "#ffff00",
+                "Alta Volatilidade": "#ff0055"
+            }
+            
+            for regime_name, color in regime_colors.items():
+                mask = [1 if l == regime_name else None for l in lab_slice]
+                y_vals = [r * 100 if m == 1 else None for r, m in zip(ret_slice, mask)]
+                fig_gmm.add_trace(go.Bar(
+                    x=list(ts_slice), y=y_vals,
+                    name=regime_name,
+                    marker_color=color,
+                    opacity=0.7
+                ))
+            
+            fig_gmm.update_layout(
+                template="plotly_dark",
+                paper_bgcolor="rgba(12, 13, 20, 0.0)",
+                plot_bgcolor="rgba(12, 13, 20, 0.3)",
+                font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+                barmode="overlay",
+                margin=dict(t=15, b=10, l=10, r=10),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+                height=280,
+                yaxis=dict(title="Retorno (%)", ticksuffix="%"),
+                xaxis=dict(title="")
+            )
+            fig_gmm.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)")
+            fig_gmm.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)")
+            st.plotly_chart(fig_gmm, use_container_width=True)
+
 
 def render_anomaly_trend_tab(df: pd.DataFrame, event_stats: dict, current_forecast: dict) -> None:
     """
@@ -1207,4 +1582,498 @@ def render_anomaly_trend_tab(df: pd.DataFrame, event_stats: dict, current_foreca
     st.plotly_chart(fig_study, use_container_width=True)
 
 
+def render_interdisciplinary_tab(df: pd.DataFrame, ising_result: dict, sir_result: dict, lv_result: dict) -> None:
+    """
+    Renderiza a aba de Modelos Interdisciplinares: Ising (Sentimento de Mercado),
+    SIR (Propagação de Pânico) e Lotka-Volterra (Dinâmica Predador-Presa).
+    """
+    if df is None or df.empty:
+        st.warning("Dados insuficientes para renderizar os modelos interdisciplinares.")
+        return
+
+    # ===================== ISING MODEL =====================
+    if ising_result is not None:
+        st.markdown("#### 🧲 Modelo de Ising — Sentimento Coletivo do Mercado")
+        st.write("Simulação de Física Estatística onde agentes (spins) compram (+1) ou vendem (-1). A magnetização média revela o consenso do mercado.")
+        
+        # KPIs Ising
+        i_col1, i_col2, i_col3, i_col4 = st.columns(4)
+        
+        sentiment = ising_result.get("sentiment", "INDECISO")
+        mag = ising_result.get("magnetization", 0)
+        sent_color = "#00ffcc" if sentiment == "BULLISH" else ("#ff0055" if sentiment == "BEARISH" else "#ffff00")
+        sent_shadow = f"0 0 15px {sent_color}"
+        
+        with i_col1:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid {sent_color}; box-shadow: inset 0 0 10px {sent_color}10;">
+                <div class="kpi-title">Sentimento do Mercado</div>
+                <div class="kpi-value" style="color: {sent_color}; text-shadow: {sent_shadow}; font-weight: 700;">{sentiment}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Magnetização: {mag:+.3f}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with i_col2:
+            phase = ising_result.get("phase", "N/A")
+            phase_color = "#00ffcc" if phase == "ORDERED" else "#ff0055"
+            phase_label = "ORDENADO" if phase == "ORDERED" else "DESORDENADO"
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid {phase_color};">
+                <div class="kpi-title">Fase do Sistema</div>
+                <div class="kpi-value" style="color: {phase_color};">{phase_label}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">T={ising_result.get('temperature', 0):.2f} | Tc={ising_result.get('critical_temp', 0):.2f}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with i_col3:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #e2e8f0;">
+                <div class="kpi-title">Acoplamento (J)</div>
+                <div class="kpi-value" style="color: #ffffff;">{ising_result.get('coupling_J', 0):.4f}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Força do comportamento de manada</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with i_col4:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #e2e8f0;">
+                <div class="kpi-title">Campo Externo (h)</div>
+                <div class="kpi-value" style="color: #ffffff;">{ising_result.get('field_h', 0):+.4f}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Tendência direcional</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.write("")
+        
+        # Gráficos Ising: Heatmap do Grid + Magnetização
+        ising_c1, ising_c2 = st.columns(2)
+        
+        with ising_c1:
+            st.markdown("##### Grade de Spins (Compradores vs Vendedores)")
+            grid = ising_result.get("grid_final", [])
+            if grid:
+                fig_grid = go.Figure(data=go.Heatmap(
+                    z=grid,
+                    colorscale=[[0, "#ff0055"], [0.5, "#1a1a2e"], [1, "#00ffcc"]],
+                    showscale=False,
+                    hovertemplate="Spin: %{z}<extra></extra>"
+                ))
+                fig_grid.update_layout(
+                    template="plotly_dark",
+                    paper_bgcolor="rgba(12, 13, 20, 0.0)",
+                    plot_bgcolor="rgba(12, 13, 20, 0.3)",
+                    margin=dict(t=10, b=10, l=10, r=10),
+                    height=300,
+                    xaxis=dict(visible=False), yaxis=dict(visible=False)
+                )
+                st.plotly_chart(fig_grid, use_container_width=True)
+        
+        with ising_c2:
+            st.markdown("##### Evolução da Magnetização (MCMC)")
+            mag_hist = ising_result.get("magnetization_history", [])
+            if mag_hist:
+                fig_mag = go.Figure()
+                fig_mag.add_trace(go.Scatter(
+                    x=list(range(len(mag_hist))), y=mag_hist,
+                    name="Magnetização",
+                    line=dict(color="#00ffcc", width=2),
+                    fill="tozeroy", fillcolor="rgba(0, 255, 204, 0.05)"
+                ))
+                fig_mag.add_trace(go.Scatter(
+                    x=list(range(len(mag_hist))), y=[0]*len(mag_hist),
+                    mode="lines", line=dict(color="rgba(255,255,255,0.2)", dash="dash"),
+                    showlegend=False, hoverinfo="skip"
+                ))
+                fig_mag.update_layout(
+                    template="plotly_dark",
+                    paper_bgcolor="rgba(12, 13, 20, 0.0)",
+                    plot_bgcolor="rgba(12, 13, 20, 0.3)",
+                    font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+                    margin=dict(t=10, b=10, l=10, r=10),
+                    height=300,
+                    xaxis=dict(title="Passos MCMC"),
+                    yaxis=dict(title="Magnetização M", range=[-1.1, 1.1])
+                )
+                fig_mag.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)")
+                fig_mag.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)")
+                st.plotly_chart(fig_mag, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # ===================== SIR MODEL =====================
+    if sir_result is not None:
+        st.markdown("#### 🦠 Modelo SIR — Propagação de Pânico/Euforia no Mercado")
+        st.write("Adaptação epidemiológica: S (Neutros), I (Em Pânico/Euforia), R (Recuperados). Projeta a propagação de sentimento extremo.")
+        
+        sir_col1, sir_col2, sir_col3, sir_col4 = st.columns(4)
+        
+        r0 = sir_result.get("R0", 0)
+        r0_color = "#ff0055" if r0 > 1 else "#00ffcc"
+        current_phase = sir_result.get("current_phase", "ESTÁVEL")
+        phase_colors = {"INÍCIO": "#ffff00", "ACELERAÇÃO": "#ff9100", "PICO": "#ff0055", "DECLÍNIO": "#e040fb", "ESTÁVEL": "#00ffcc"}
+        ph_color = phase_colors.get(current_phase, "#8a8d9a")
+        
+        with sir_col1:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid {r0_color};">
+                <div class="kpi-title">Número Reprodutivo (R₀)</div>
+                <div class="kpi-value" style="color: {r0_color}; text-shadow: 0 0 10px {r0_color};">{r0:.2f}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">{"Epidemia Ativa" if r0 > 1 else "Sob Controle"}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with sir_col2:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid {ph_color};">
+                <div class="kpi-title">Fase Atual</div>
+                <div class="kpi-value" style="color: {ph_color}; font-weight: 700;">{current_phase}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Ciclo epidemiológico</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with sir_col3:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #ff0055;">
+                <div class="kpi-title">Pico de Infecção</div>
+                <div class="kpi-value" style="color: #ffffff;">{sir_result.get('peak_infection', 0)*100:.1f}%</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">No passo {sir_result.get('peak_step', 0)}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with sir_col4:
+            hit = sir_result.get("herd_immunity_threshold", 0)
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #e2e8f0;">
+                <div class="kpi-title">Limiar Imunidade</div>
+                <div class="kpi-value" style="color: #ffffff;">{hit*100:.1f}%</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">1 - 1/R₀</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.write("")
+        
+        # Gráfico SIR
+        sir_steps = sir_result.get("steps", [])
+        sir_S = sir_result.get("S", [])
+        sir_I = sir_result.get("I", [])
+        sir_R = sir_result.get("R", [])
+        
+        if sir_steps and sir_S:
+            fig_sir = go.Figure()
+            fig_sir.add_trace(go.Scatter(
+                x=sir_steps, y=[s*100 for s in sir_S],
+                name="Suscetíveis (Neutros)",
+                line=dict(color="#00ffcc", width=2),
+                fill="tozeroy", fillcolor="rgba(0, 255, 204, 0.03)"
+            ))
+            fig_sir.add_trace(go.Scatter(
+                x=sir_steps, y=[i*100 for i in sir_I],
+                name="Infectados (Pânico/Euforia)",
+                line=dict(color="#ff0055", width=2.5),
+                fill="tozeroy", fillcolor="rgba(255, 0, 85, 0.05)"
+            ))
+            fig_sir.add_trace(go.Scatter(
+                x=sir_steps, y=[r*100 for r in sir_R],
+                name="Recuperados",
+                line=dict(color="#8a8d9a", width=2),
+                fill="tozeroy", fillcolor="rgba(138, 141, 154, 0.03)"
+            ))
+            
+            fig_sir.update_layout(
+                template="plotly_dark",
+                paper_bgcolor="rgba(12, 13, 20, 0.0)",
+                plot_bgcolor="rgba(12, 13, 20, 0.3)",
+                font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+                hovermode="x unified",
+                margin=dict(t=15, b=10, l=10, r=10),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+                height=350,
+                xaxis=dict(title="Períodos de Projeção"),
+                yaxis=dict(title="Proporção da População (%)", ticksuffix="%")
+            )
+            fig_sir.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+            fig_sir.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+            st.plotly_chart(fig_sir, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # ===================== LOTKA-VOLTERRA =====================
+    if lv_result is not None:
+        st.markdown("#### 🐺 Lotka-Volterra — Dinâmica Predador-Presa (Compradores vs Vendedores)")
+        st.write("Modelo ecológico onde compradores (presas) e vendedores (predadores) oscilam em ciclos naturais de oferta e demanda.")
+        
+        lv_col1, lv_col2, lv_col3 = st.columns(3)
+        
+        dominance = lv_result.get("current_dominance", "N/A")
+        dom_color = "#00ffcc" if dominance == "COMPRADORES" else "#ff0055"
+        
+        with lv_col1:
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid {dom_color};">
+                <div class="kpi-title">Dominância Atual</div>
+                <div class="kpi-value" style="color: {dom_color}; text-shadow: 0 0 10px {dom_color}; font-weight: 700;">{dominance}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Força dominante no mercado</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with lv_col2:
+            cycle = lv_result.get("cycle_period", None)
+            cycle_str = f"{cycle:.1f}" if cycle else "N/A"
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #ffff00;">
+                <div class="kpi-title">Período do Ciclo</div>
+                <div class="kpi-value" style="color: #ffff00;">{cycle_str}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Passos por oscilação</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with lv_col3:
+            eq_b = lv_result.get("equilibrium_buyers", 0)
+            eq_s = lv_result.get("equilibrium_sellers", 0)
+            st.markdown(f"""
+            <div class="kpi-card" style="border-top: 3px solid #e2e8f0;">
+                <div class="kpi-title">Equilíbrio</div>
+                <div class="kpi-value" style="color: #ffffff; font-size: 1.2rem;">B={eq_b:.2f} | V={eq_s:.2f}</div>
+                <div class="kpi-subtitle" style="color: #8a8d9a;">Ponto fixo do sistema</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.write("")
+        
+        # Gráficos LV: Dinâmica temporal e Retrato de Fase
+        lv_c1, lv_c2 = st.columns(2)
+        
+        with lv_c1:
+            st.markdown("##### Dinâmica Temporal")
+            lv_steps = lv_result.get("steps", [])
+            buyers = lv_result.get("buyers", [])
+            sellers = lv_result.get("sellers", [])
+            
+            if lv_steps and buyers:
+                fig_lv = go.Figure()
+                fig_lv.add_trace(go.Scatter(
+                    x=lv_steps, y=buyers,
+                    name="Compradores (Presa)",
+                    line=dict(color="#00ffcc", width=2.5)
+                ))
+                fig_lv.add_trace(go.Scatter(
+                    x=lv_steps, y=sellers,
+                    name="Vendedores (Predador)",
+                    line=dict(color="#ff0055", width=2.5)
+                ))
+                fig_lv.update_layout(
+                    template="plotly_dark",
+                    paper_bgcolor="rgba(12, 13, 20, 0.0)",
+                    plot_bgcolor="rgba(12, 13, 20, 0.3)",
+                    font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+                    hovermode="x unified",
+                    margin=dict(t=10, b=10, l=10, r=10),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+                    height=300,
+                    xaxis=dict(title="Passos de Projeção"),
+                    yaxis=dict(title="População")
+                )
+                fig_lv.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)")
+                fig_lv.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)")
+                st.plotly_chart(fig_lv, use_container_width=True)
+        
+        with lv_c2:
+            st.markdown("##### Retrato de Fase (Espaço de Estados)")
+            pp_x = lv_result.get("phase_portrait_x", [])
+            pp_y = lv_result.get("phase_portrait_y", [])
+            
+            if pp_x and pp_y:
+                fig_phase = go.Figure()
+                fig_phase.add_trace(go.Scatter(
+                    x=pp_x, y=pp_y,
+                    mode="lines",
+                    name="Trajetória",
+                    line=dict(color="#e040fb", width=2)
+                ))
+                # Ponto de equilíbrio
+                fig_phase.add_trace(go.Scatter(
+                    x=[eq_b], y=[eq_s],
+                    mode="markers",
+                    name="Equilíbrio",
+                    marker=dict(color="#ffff00", size=12, symbol="star")
+                ))
+                fig_phase.update_layout(
+                    template="plotly_dark",
+                    paper_bgcolor="rgba(12, 13, 20, 0.0)",
+                    plot_bgcolor="rgba(12, 13, 20, 0.3)",
+                    font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+                    margin=dict(t=10, b=10, l=10, r=10),
+                    height=300,
+                    xaxis=dict(title="Compradores"),
+                    yaxis=dict(title="Vendedores")
+                )
+                fig_phase.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)")
+                fig_phase.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)")
+                st.plotly_chart(fig_phase, use_container_width=True)
+
+
+def render_decision_tab(df: pd.DataFrame, pomdp_result: dict) -> None:
+    """
+    Renderiza a aba de Inteligência de Decisão via POMDP.
+    Exibe o estado de crença (belief state), recomendação de ação e evolução temporal.
+    """
+    if df is None or df.empty or pomdp_result is None:
+        st.warning("Dados insuficientes para renderizar o modelo de decisão POMDP.")
+        return
+    
+    # KPIs Principais
+    action = pomdp_result.get("recommended_action", "MANTER")
+    confidence = pomdp_result.get("action_confidence", 0)
+    dominant = pomdp_result.get("dominant_state", "NEUTRAL")
+    current_belief = pomdp_result.get("current_belief", {})
+    
+    action_colors = {"COMPRAR": "#00ffcc", "VENDER": "#ff0055", "MANTER": "#ffff00"}
+    state_colors = {"BULL": "#00ffcc", "BEAR": "#ff0055", "NEUTRAL": "#ffff00"}
+    action_color = action_colors.get(action, "#8a8d9a")
+    state_color = state_colors.get(dominant, "#8a8d9a")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-top: 3px solid {action_color}; box-shadow: inset 0 0 15px {action_color}10;">
+            <div class="kpi-title">Ação Recomendada</div>
+            <div class="kpi-value" style="color: {action_color}; text-shadow: 0 0 15px {action_color}; font-weight: 700; font-size: 2.2rem;">{action}</div>
+            <div class="kpi-subtitle" style="color: #8a8d9a;">Confiança: {confidence*100:.1f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        state_label = {"BULL": "ALTA (BULL)", "BEAR": "BAIXA (BEAR)", "NEUTRAL": "NEUTRO"}.get(dominant, dominant)
+        st.markdown(f"""
+        <div class="kpi-card" style="border-top: 3px solid {state_color};">
+            <div class="kpi-title">Estado Dominante do Mercado</div>
+            <div class="kpi-value" style="color: {state_color}; text-shadow: 0 0 10px {state_color};">{state_label}</div>
+            <div class="kpi-subtitle" style="color: #8a8d9a;">Inferido via observações parciais</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        bull_b = current_belief.get("BULL", 0)
+        bear_b = current_belief.get("BEAR", 0)
+        neut_b = current_belief.get("NEUTRAL", 0)
+        st.markdown(f"""
+        <div class="kpi-card" style="border-top: 3px solid #e2e8f0;">
+            <div class="kpi-title">Vetor de Crença Atual</div>
+            <div class="kpi-value" style="color: #ffffff; font-size: 1.2rem;">
+                <span style="color: #00ffcc;">B:{bull_b*100:.0f}%</span> | 
+                <span style="color: #ff0055;">b:{bear_b*100:.0f}%</span> | 
+                <span style="color: #ffff00;">N:{neut_b*100:.0f}%</span>
+            </div>
+            <div class="kpi-subtitle" style="color: #8a8d9a;">P(Bull) | P(Bear) | P(Neutral)</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.write("")
+    
+    # Recompensas Estimadas
+    rewards = pomdp_result.get("reward_estimates", {})
+    if rewards:
+        st.markdown("#### 💰 Valor Esperado por Ação")
+        r_col1, r_col2, r_col3 = st.columns(3)
+        for col_obj, (act, val) in zip([r_col1, r_col2, r_col3], [("COMPRAR", rewards.get("COMPRAR", 0)), ("VENDER", rewards.get("VENDER", 0)), ("MANTER", rewards.get("MANTER", 0))]):
+            a_color = action_colors.get(act, "#8a8d9a")
+            val_sign = "+" if val >= 0 else ""
+            with col_obj:
+                st.markdown(f"""
+                <div class="kpi-card" style="border-top: 3px solid {a_color};">
+                    <div class="kpi-title">{act}</div>
+                    <div class="kpi-value" style="color: {a_color};">{val_sign}{val:.2f}</div>
+                    <div class="kpi-subtitle" style="color: #8a8d9a;">Recompensa esperada</div>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    st.write("")
+    
+    # Gráfico de Evolução do Belief State
+    belief_history = pomdp_result.get("belief_history", [])
+    timestamps = pomdp_result.get("timestamps", [])
+    
+    if belief_history and timestamps:
+        st.markdown("#### 📈 Evolução do Estado de Crença (Belief State)")
+        st.write("Distribuição de probabilidade sobre os 3 estados ocultos ao longo do tempo, atualizada a cada observação via algoritmo forward.")
+        
+        show_n = min(60, len(belief_history))
+        ts_slice = timestamps[-show_n:]
+        bh_slice = belief_history[-show_n:]
+        
+        bull_vals = [b.get("BULL", 0)*100 for b in bh_slice]
+        bear_vals = [b.get("BEAR", 0)*100 for b in bh_slice]
+        neut_vals = [b.get("NEUTRAL", 0)*100 for b in bh_slice]
+        
+        fig_belief = go.Figure()
+        fig_belief.add_trace(go.Scatter(
+            x=ts_slice, y=bull_vals,
+            name="P(BULL)",
+            line=dict(color="#00ffcc", width=2),
+            stackgroup="one",
+            fillcolor="rgba(0, 255, 204, 0.15)"
+        ))
+        fig_belief.add_trace(go.Scatter(
+            x=ts_slice, y=neut_vals,
+            name="P(NEUTRAL)",
+            line=dict(color="#ffff00", width=2),
+            stackgroup="one",
+            fillcolor="rgba(255, 255, 0, 0.10)"
+        ))
+        fig_belief.add_trace(go.Scatter(
+            x=ts_slice, y=bear_vals,
+            name="P(BEAR)",
+            line=dict(color="#ff0055", width=2),
+            stackgroup="one",
+            fillcolor="rgba(255, 0, 85, 0.15)"
+        ))
+        
+        fig_belief.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(12, 13, 20, 0.0)",
+            plot_bgcolor="rgba(12, 13, 20, 0.3)",
+            font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+            hovermode="x unified",
+            margin=dict(t=15, b=10, l=10, r=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+            height=400,
+            yaxis=dict(title="Probabilidade (%)", range=[0, 100], ticksuffix="%")
+        )
+        fig_belief.update_xaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+        fig_belief.update_yaxes(showgrid=True, gridcolor="rgba(31, 34, 53, 0.4)", linecolor="rgba(0, 255, 204, 0.2)")
+        st.plotly_chart(fig_belief, use_container_width=True)
+    
+    # Matriz de Transição
+    transition = pomdp_result.get("transition_matrix", {})
+    if transition:
+        st.write("")
+        st.markdown("#### 🔄 Matriz de Transição de Estados (Calibrada)")
+        st.write("Probabilidades de transição entre estados ocultos, estimadas empiricamente a partir dos dados históricos.")
+        
+        states = ["BULL", "BEAR", "NEUTRAL"]
+        z_matrix = []
+        text_matrix = []
+        for s_from in states:
+            row = []
+            text_row = []
+            for s_to in states:
+                key = f"{s_from}_to_{s_to}"
+                val = transition.get(key, 0)
+                row.append(val * 100)
+                text_row.append(f"{val*100:.1f}%")
+            z_matrix.append(row)
+            text_matrix.append(text_row)
+        
+        fig_trans = go.Figure(data=go.Heatmap(
+            z=z_matrix,
+            x=["→ BULL", "→ BEAR", "→ NEUTRO"],
+            y=["BULL →", "BEAR →", "NEUTRO →"],
+            colorscale=[[0, "rgba(12, 13, 20, 0.95)"], [0.5, "rgba(0, 255, 204, 0.4)"], [1, "rgba(255, 0, 85, 0.75)"]],
+            text=text_matrix,
+            texttemplate="%{text}",
+            textfont=dict(family="Rajdhani, sans-serif", size=14, color="#ffffff"),
+            showscale=False
+        ))
+        fig_trans.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(12, 13, 20, 0.0)",
+            plot_bgcolor="rgba(12, 13, 20, 0.3)",
+            font=dict(family="Rajdhani, sans-serif", size=13, color="#8a8d9a"),
+            height=280,
+            margin=dict(t=10, b=10, l=10, r=10)
+        )
+        st.plotly_chart(fig_trans, use_container_width=True)
 
